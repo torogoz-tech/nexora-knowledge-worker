@@ -37,6 +37,10 @@ jobs:
             echo "The knowledge worker must not compile API persistence, MCP, or code-analysis packages." >&2
             exit 1
           fi
+          if cargo tree -p nexora-knowledge-worker | grep 'github.com/torogoz-tech/nexora-api.git'; then
+            echo "The knowledge worker must not depend on source revisions from the API repository." >&2
+            exit 1
+          fi
   build-artifact:
     needs: quality
     runs-on: ubuntu-24.04

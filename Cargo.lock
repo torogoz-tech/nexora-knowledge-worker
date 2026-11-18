@@ -1499,10 +1499,11 @@ dependencies = [
  "nexora-database-connections",
  "nexora-knowledge-store",
  "nexora-platform",
- "nexora-reasoning",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
+ "ureq",
  "zeroize",
 ]
 
@@ -1517,22 +1518,6 @@ dependencies = [
  "serde_json",
  "thiserror",
  "url",
- "zeroize",
-]
-
-[[package]]
-name = "nexora-reasoning"
-version = "0.4.0"
-source = "git+https://github.com/torogoz-tech/nexora-api.git?rev=4c86eac#4c86eaca5e3886f4d819227a7c2bbf6319ee1cb8"
-dependencies = [
- "base64 0.22.1",
- "clap",
- "nexora-platform",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror",
- "ureq",
  "zeroize",
 ]
 

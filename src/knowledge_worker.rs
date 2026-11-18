@@ -1,13 +1,13 @@
 use crate::KnowledgeSettings;
+use crate::{
+    DailyDeveloperAnalysis, DocumentSynthesis, KnowledgeStructuring, OpenAiClient, SecretFile,
+};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use nexora_database_connections::DatabaseConnections;
 use nexora_knowledge_store::{
     KnowledgeChunker, KnowledgeEmbeddingRecord, KnowledgeStore, KnowledgeSynthesisJob,
 };
 use nexora_platform_contracts::{OpenAiConfiguration, PlatformError};
-use nexora_reasoning::{
-    DailyDeveloperAnalysis, DocumentSynthesis, KnowledgeStructuring, OpenAiClient, SecretFile,
-};
 use serde_json::json;
 use std::path::Path;
 use zeroize::Zeroizing;

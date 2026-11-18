@@ -1,6 +1,6 @@
 # Nexora Knowledge Worker
 
-Version 0.4.0 worker for knowledge synthesis, knowledge processing, daily developer analysis, and developer rating refresh. Its PostgreSQL operations live in the separately maintained knowledge store; it does not use the API's platform store or compile the code indexer, lexer, parser, or MCP server.
+Version 0.4.0 worker for knowledge synthesis, knowledge processing, daily developer analysis, and developer rating refresh. Its PostgreSQL operations live in the separately maintained knowledge store; its bounded OpenAI transport and knowledge prompts are worker-owned. It does not use API source revisions, the API platform store, or compile the code indexer, lexer, parser, or MCP server.
 
 PostgreSQL remains the source of truth. RabbitMQ wakes workers; this service recovers pending work on startup and broker reconnect, then claims work using PostgreSQL locking so multiple replicas can run concurrently. Pending jobs are drained before consuming new wake-ups. A five-minute scheduler tick only creates due daily analysis jobs and is not a pending-work poll.
 
