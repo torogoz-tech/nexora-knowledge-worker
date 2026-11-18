@@ -8,12 +8,15 @@ use nexora_knowledge_store::{
     KnowledgeChunker, KnowledgeEmbeddingRecord, KnowledgeStore, KnowledgeSynthesisJob,
 };
 use nexora_platform_contracts::{OpenAiConfiguration, PlatformError};
+use nexora_task_workflow::{TaskKnowledgeJob, TaskWorkflowStore};
 use serde_json::json;
 use std::path::Path;
+use std::time::SystemTime;
 use zeroize::Zeroizing;
 
 pub struct KnowledgeWorker {
     knowledge_store: KnowledgeStore,
+    task_workflow_store: TaskWorkflowStore,
     settings: KnowledgeSettings,
 }
 
@@ -25,6 +28,7 @@ impl KnowledgeWorker {
     ) -> Result<Self, PlatformError> {
         Ok(Self {
             knowledge_store: KnowledgeStore::connect(connections, schema)?,
+            task_workflow_store: TaskWorkflowStore::connect(connections, schema)?,
             settings: KnowledgeSettings::load(settings_path)?,
         })
     }
@@ -38,6 +42,13 @@ impl KnowledgeWorker {
     }
 
     pub fn run_once(&mut self) -> Result<bool, PlatformError> {
+        if self.run_task_review_once()?.is_some() {
+            return Ok(true);
+        }
+        self.run_knowledge_once()
+    }
+
+    fn run_knowledge_once(&mut self) -> Result<bool, PlatformError> {
         let Some((client, effort, embedding_model)) =
             Self::client(&mut self.knowledge_store, &self.settings)?
         else {
@@ -54,8 +65,95 @@ impl KnowledgeWorker {
         Ok(synthesis || processing || daily)
     }
 
+    fn run_task_review_once(
+        &mut self,
+    ) -> Result<Option<crate::TaskReviewProcessingOutcome>, PlatformError> {
+        let wakeups = self.task_workflow_store.pending_task_knowledge_wakeups()?;
+        for wakeup in wakeups {
+            if wakeup.available_at > SystemTime::now() {
+                continue;
+            }
+            let Some(kind) =
+                crate::TaskKnowledgeJobKind::from_job(&wakeup.job_id, &wakeup.job_kind)
+            else {
+                return Err(PlatformError::Validation(
+                    "invalid task review job identity",
+                ));
+            };
+            let job = match kind {
+                crate::TaskKnowledgeJobKind::TechnicalReview => self
+                    .task_workflow_store
+                    .claim_task_pre_pr_review(&wakeup.job_id)?,
+                crate::TaskKnowledgeJobKind::ContributorRating => self
+                    .task_workflow_store
+                    .claim_task_contributor_rating(&wakeup.job_id)?,
+            };
+            let Some(job) = job else {
+                continue;
+            };
+            return self.process_task_knowledge_job(job).map(Some);
+        }
+        Ok(None)
+    }
+
+    fn process_task_knowledge_job(
+        &mut self,
+        job: TaskKnowledgeJob,
+    ) -> Result<crate::TaskReviewProcessingOutcome, PlatformError> {
+        let Some((client, effort, _)) = Self::client(&mut self.knowledge_store, &self.settings)?
+        else {
+            return Err(PlatformError::Unavailable);
+        };
+        crate::TaskReviewProcessing::process(&mut self.task_workflow_store, &client, &job, &effort)
+    }
+
     pub fn drain_pending(&mut self) -> Result<(), PlatformError> {
         while self.run_once()? {}
+        Ok(())
+    }
+
+    pub(crate) fn drain_task_knowledge_pending(
+        &mut self,
+    ) -> Result<Vec<crate::TaskReviewProcessingOutcome>, PlatformError> {
+        let mut outcomes = Vec::new();
+        while let Some(outcome) = self.run_task_review_once()? {
+            outcomes.push(outcome);
+        }
+        Ok(outcomes)
+    }
+
+    pub(crate) fn drain_wakeup(
+        &mut self,
+        task_review_job_id: Option<&str>,
+    ) -> Result<Vec<crate::TaskReviewProcessingOutcome>, PlatformError> {
+        let mut outcomes = Vec::new();
+        if let Some(job_id) = task_review_job_id {
+            let kind = crate::TaskKnowledgeJobKind::from_wakeup(job_id).ok_or(
+                PlatformError::Validation("invalid task review job identity"),
+            )?;
+            let job = match kind {
+                crate::TaskKnowledgeJobKind::TechnicalReview => {
+                    self.task_workflow_store.claim_task_pre_pr_review(job_id)?
+                }
+                crate::TaskKnowledgeJobKind::ContributorRating => self
+                    .task_workflow_store
+                    .claim_task_contributor_rating(job_id)?,
+            };
+            if let Some(job) = job {
+                outcomes.push(self.process_task_knowledge_job(job)?);
+            } else if let Some(wakeup) = self.task_workflow_store.task_knowledge_wakeup(job_id)? {
+                outcomes.push(crate::TaskReviewProcessingOutcome::ClaimDeferred(wakeup));
+            } else {
+                outcomes.push(crate::TaskReviewProcessingOutcome::ClaimSuperseded);
+            }
+            outcomes.extend(self.drain_task_knowledge_pending()?);
+        }
+        self.drain_scheduled()?;
+        Ok(outcomes)
+    }
+
+    pub(crate) fn drain_scheduled(&mut self) -> Result<(), PlatformError> {
+        while self.run_knowledge_once()? {}
         Ok(())
     }
 

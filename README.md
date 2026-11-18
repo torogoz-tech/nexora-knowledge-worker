@@ -1,13 +1,13 @@
 # Nexora Knowledge Worker
 
-Version 0.4.0 worker for knowledge synthesis, knowledge processing, daily developer analysis, and developer rating refresh. Its PostgreSQL operations live in the separately maintained knowledge store; its bounded OpenAI transport and knowledge prompts are worker-owned. It does not use API source revisions, the API platform store, or compile the code indexer, lexer, parser, or MCP server.
+Version 0.4.0 worker for knowledge synthesis, knowledge processing, daily developer analysis, developer rating refresh, and asynchronous task code reviews and contributor ratings. Knowledge persistence lives in the separately maintained knowledge store. Task review jobs use the dedicated `nexora-task-workflow` API from the immutable `nexora-job-store-v0.4.0-final` release. The bounded OpenAI transport and inference prompts are worker-owned. It does not depend on API source, `nexora-reasoning`, `nexora-platform-store`, or `analysis-engine`, and does not compile the code indexer, lexer, parser, or MCP server.
 
 PostgreSQL remains the source of truth. RabbitMQ wakes workers; this service recovers pending work on startup and broker reconnect, then claims work using PostgreSQL locking so multiple replicas can run concurrently. Pending jobs are drained before consuming new wake-ups. A five-minute scheduler tick only creates due daily analysis jobs and is not a pending-work poll.
 
 ## Configuration
 
 - NEXORA_DATABASE_CONNECTIONS: path to Nexora database connection settings.
-- NEXORA_DATABASE_SCHEMA: PostgreSQL schema, defaults to public.
+- NEXORA_DATABASE_SCHEMA: Nexora platform PostgreSQL schema, defaults to `nexora_platform`.
 - NEXORA_REASONING_SETTINGS: path to reasoning settings JSON with key_file, model, and effort when no OpenAI runtime configuration is installed.
 - NEXORA_RABBITMQ_URL: required in continuous mode.
 

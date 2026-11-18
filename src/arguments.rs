@@ -6,7 +6,11 @@ use std::path::PathBuf;
 pub struct Arguments {
     #[arg(long, env = "NEXORA_DATABASE_CONNECTIONS")]
     pub connections: PathBuf,
-    #[arg(long, env = "NEXORA_DATABASE_SCHEMA", default_value = "public")]
+    #[arg(
+        long,
+        env = "NEXORA_DATABASE_SCHEMA",
+        default_value = "nexora_platform"
+    )]
     pub schema: String,
     #[arg(long, env = "NEXORA_REASONING_SETTINGS")]
     pub settings: PathBuf,
