@@ -1,4 +1,4 @@
-use nexora_platform::PlatformError;
+use nexora_platform_contracts::PlatformError;
 
 pub(crate) struct WorkerShutdown {
     #[cfg(unix)]

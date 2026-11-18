@@ -5,7 +5,7 @@ use lapin::{
     options::{BasicConsumeOptions, BasicQosOptions},
     types::FieldTable,
 };
-use nexora_platform::{JobKind, JobWakeup, PlatformError};
+use nexora_platform_contracts::{JobKind, JobWakeup, PlatformError};
 
 pub(crate) struct RabbitMqJobWakeupConsumer {
     _connection: Connection,
@@ -83,7 +83,7 @@ impl RabbitMqJobWakeupConsumer {
 #[cfg(test)]
 mod tests {
     use super::RabbitMqJobWakeupConsumer;
-    use nexora_platform::{JobKind, JobWakeup};
+    use nexora_platform_contracts::{JobKind, JobWakeup};
 
     #[test]
     fn accepts_only_knowledge_queue_wakeups_with_matching_message_ids() {

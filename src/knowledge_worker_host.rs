@@ -1,6 +1,6 @@
 use crate::{KnowledgeWorker, RabbitMqJobWakeupConsumer, WorkerShutdown};
-use nexora_platform::PlatformError;
-use nexora_runtime::DatabaseConnections;
+use nexora_database_connections::DatabaseConnections;
+use nexora_platform_contracts::PlatformError;
 use std::{path::PathBuf, time::Duration};
 
 pub struct KnowledgeWorkerHost;

@@ -1,5 +1,5 @@
 use lapin::{message::Delivery, options::BasicAckOptions, options::BasicNackOptions};
-use nexora_platform::PlatformError;
+use nexora_platform_contracts::PlatformError;
 
 pub(crate) struct RabbitMqJobWakeupDelivery {
     delivery: Delivery,

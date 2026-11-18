@@ -3,7 +3,7 @@ use lapin::{
     options::{ExchangeDeclareOptions, QueueBindOptions, QueueDeclareOptions},
     types::{AMQPValue, FieldTable},
 };
-use nexora_platform::{JobKind, PlatformError};
+use nexora_platform_contracts::{JobKind, PlatformError};
 
 const JOBS_EXCHANGE: &str = "nexora.jobs";
 const DEAD_LETTER_EXCHANGE: &str = "nexora.jobs.dead";

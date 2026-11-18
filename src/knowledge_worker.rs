@@ -1,16 +1,19 @@
 use crate::KnowledgeSettings;
-use nexora_platform::{InstallationService, OpenAiConfiguration, PlatformError};
-use nexora_platform_store::PlatformStore;
+use base64::{Engine, engine::general_purpose::STANDARD};
+use nexora_database_connections::DatabaseConnections;
+use nexora_knowledge_store::{
+    KnowledgeChunker, KnowledgeEmbeddingRecord, KnowledgeStore, KnowledgeSynthesisJob,
+};
+use nexora_platform_contracts::{OpenAiConfiguration, PlatformError};
 use nexora_reasoning::{
     DailyDeveloperAnalysis, DocumentSynthesis, KnowledgeStructuring, OpenAiClient, SecretFile,
 };
-use nexora_runtime::DatabaseConnections;
 use serde_json::json;
 use std::path::Path;
 use zeroize::Zeroizing;
 
 pub struct KnowledgeWorker {
-    store: PlatformStore,
+    knowledge_store: KnowledgeStore,
     settings: KnowledgeSettings,
 }
 
@@ -21,29 +24,33 @@ impl KnowledgeWorker {
         settings_path: &Path,
     ) -> Result<Self, PlatformError> {
         Ok(Self {
-            store: PlatformStore::connect(connections, schema)?,
+            knowledge_store: KnowledgeStore::connect(connections, schema)?,
             settings: KnowledgeSettings::load(settings_path)?,
         })
     }
 
     pub fn schedule_daily(&mut self) -> Result<u64, PlatformError> {
-        self.store.schedule_daily_developer_analyses()
+        self.knowledge_store.schedule_daily_developer_analyses()
     }
 
     pub fn refresh_ratings(&mut self) -> Result<u64, PlatformError> {
-        self.store.refresh_developer_ratings()
+        self.knowledge_store.refresh_developer_ratings()
     }
 
     pub fn run_once(&mut self) -> Result<bool, PlatformError> {
         let Some((client, effort, embedding_model)) =
-            Self::client(&mut self.store, &self.settings)?
+            Self::client(&mut self.knowledge_store, &self.settings)?
         else {
             return Ok(false);
         };
-        let synthesis = Self::synthesize(&mut self.store, &client, &effort)?;
-        let processing =
-            Self::process_knowledge(&mut self.store, &client, &effort, &embedding_model)?;
-        let daily = Self::analyze_daily(&mut self.store, &client, &effort)?;
+        let synthesis = Self::synthesize(&mut self.knowledge_store, &client, &effort)?;
+        let processing = Self::process_knowledge(
+            &mut self.knowledge_store,
+            &client,
+            &effort,
+            &embedding_model,
+        )?;
+        let daily = Self::analyze_daily(&mut self.knowledge_store, &client, &effort)?;
         Ok(synthesis || processing || daily)
     }
 
@@ -53,11 +60,11 @@ impl KnowledgeWorker {
     }
 
     fn client(
-        store: &mut PlatformStore,
+        store: &mut KnowledgeStore,
         settings: &KnowledgeSettings,
     ) -> Result<Option<(OpenAiClient, String, String)>, PlatformError> {
         let (key, model, effort, endpoint, embedding_model) =
-            if let Some(runtime) = store.service_runtime_settings(InstallationService::Openai)? {
+            if let Some(runtime) = store.openai_service_runtime_settings()? {
                 let metadata: OpenAiConfiguration =
                     serde_json::from_value(runtime.settings).map_err(|_| PlatformError::Storage)?;
                 if !metadata.enabled {
@@ -89,24 +96,21 @@ impl KnowledgeWorker {
     }
 
     fn synthesize(
-        store: &mut PlatformStore,
+        store: &mut KnowledgeStore,
         client: &OpenAiClient,
         effort: &str,
     ) -> Result<bool, PlatformError> {
         let Some(job) = store.claim_knowledge_synthesis()? else {
             return Ok(false);
         };
-        let id = job["id"].as_str().ok_or(PlatformError::Storage)?;
-        let revision = job["source_revision"]
-            .as_i64()
-            .ok_or(PlatformError::Storage)?;
-        let body = DocumentSynthesis::run(client, &job, effort);
-        store.finish_knowledge_synthesis(id, revision, body.as_deref().ok())?;
+        let input = Self::synthesis_input(&job);
+        let body = DocumentSynthesis::run(client, &input, effort);
+        store.finish_knowledge_synthesis(&job, body.as_deref().ok())?;
         Ok(true)
     }
 
     fn process_knowledge(
-        store: &mut PlatformStore,
+        store: &mut KnowledgeStore,
         client: &OpenAiClient,
         effort: &str,
         embedding_model: &str,
@@ -118,14 +122,44 @@ impl KnowledgeWorker {
         let result = (|| -> Result<(), PlatformError> {
             let structure = KnowledgeStructuring::run(
                 client,
-                job["source_kind"].as_str().unwrap_or("knowledge"),
-                &source.0,
-                &source.1,
+                &job.source_kind,
+                &source.title,
+                &source.body,
                 effort,
             )
             .map_err(|_| PlatformError::Unavailable)?;
-            store.finish_knowledge_processing(&job, &source.0, &source.1, source.2, &structure)?;
-            store.publish_knowledge_embeddings(&job, client, embedding_model)
+            let chunks = KnowledgeChunker::new(1800, 180)?.chunk(
+                &job.resource_id,
+                job.source_revision,
+                &source.title,
+                &source.body,
+            )?;
+            store.finish_knowledge_processing(&job, &structure, &chunks)?;
+            for batch in chunks.chunks(64) {
+                let inputs = batch
+                    .iter()
+                    .map(|chunk| chunk.content.clone())
+                    .collect::<Vec<_>>();
+                let embeddings = client
+                    .embed_many(embedding_model, &inputs)
+                    .map_err(|_| PlatformError::Unavailable)?;
+                let records = batch
+                    .iter()
+                    .zip(embeddings)
+                    .map(|(chunk, values)| KnowledgeEmbeddingRecord {
+                        chunk_id: chunk.id.clone(),
+                        content_hash: chunk.content_hash.clone(),
+                        values,
+                    })
+                    .collect::<Vec<_>>();
+                store.store_knowledge_embeddings(&job, embedding_model, &records)?;
+            }
+            if !store.publish_knowledge_embeddings(&job, embedding_model)? {
+                return Err(PlatformError::Conflict(
+                    "knowledge processing lease expired before publication",
+                ));
+            }
+            Ok(())
         })();
         if let Err(error) = result {
             store.fail_knowledge_processing(&job, &error.to_string())?;
@@ -134,7 +168,7 @@ impl KnowledgeWorker {
     }
 
     fn analyze_daily(
-        store: &mut PlatformStore,
+        store: &mut KnowledgeStore,
         client: &OpenAiClient,
         effort: &str,
     ) -> Result<bool, PlatformError> {
@@ -142,18 +176,29 @@ impl KnowledgeWorker {
             return Ok(false);
         };
         let input = json!({
-            "date": job["date"],
-            "timezone": job["timezone"],
-            "language": job["language"],
+            "date": job.date,
+            "timezone": job.timezone,
+            "language": job.language,
             "evidence": {
-                "items": job["evidence"]["items"],
-                "counts": job["evidence"]["counts"],
-                "availability": job["evidence"]["availability"]
+                "items": job.evidence["items"],
+                "counts": job.evidence["counts"],
+                "availability": job.evidence["availability"]
             }
         });
         let report = DailyDeveloperAnalysis::run(client, &input, effort)
             .map_err(|_| PlatformError::Unavailable);
         store.finish_daily_developer_analysis(&job, report.as_ref().ok())?;
         report.map(|_| true)
+    }
+
+    fn synthesis_input(job: &KnowledgeSynthesisJob) -> serde_json::Value {
+        json!({
+            "id": job.id,
+            "filename": job.filename,
+            "mime_type": job.mime_type,
+            "data_base64": STANDARD.encode(&job.payload),
+            "source_revision": job.source_revision,
+            "language": job.language
+        })
     }
 }

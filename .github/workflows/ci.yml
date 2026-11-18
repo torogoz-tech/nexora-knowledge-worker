@@ -31,6 +31,12 @@ jobs:
       - run: cargo check --locked
       - run: cargo test --locked
       - run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Keep the worker dependency graph focused
+        run: |
+          if cargo tree -p nexora-knowledge-worker | grep -E 'nexora-(indexer|lexer|parser|mcp|runtime|platform-store|retrieval)( | v)'; then
+            echo "The knowledge worker must not compile API persistence, MCP, or code-analysis packages." >&2
+            exit 1
+          fi
   build-artifact:
     needs: quality
     runs-on: ubuntu-24.04
