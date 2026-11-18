@@ -8,6 +8,8 @@ mod document_synthesis_tests;
 mod http_fixture;
 mod knowledge_settings;
 mod knowledge_structuring;
+#[cfg(test)]
+mod knowledge_structuring_tests;
 mod knowledge_worker;
 mod knowledge_worker_host;
 mod openai_client;
