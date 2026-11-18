@@ -8,6 +8,8 @@ use nexora_platform_contracts::{JobKind, PlatformError};
 const JOBS_EXCHANGE: &str = "nexora.jobs";
 const DEAD_LETTER_EXCHANGE: &str = "nexora.jobs.dead";
 const DEAD_LETTER_QUEUE: &str = "nexora.jobs.dead";
+const KNOWLEDGE_RETRY_QUEUE: &str = "nexora.jobs.knowledge.retry";
+const KNOWLEDGE_RETRY_ROUTING_KEY: &str = "nexora.jobs.knowledge.retry";
 
 pub(crate) struct RabbitMqJobWakeupTopology;
 
@@ -59,15 +61,52 @@ impl RabbitMqJobWakeupTopology {
             .await
             .map_err(|_| PlatformError::Unavailable)?;
 
+        for kind in [JobKind::KnowledgeSynthesis, JobKind::TaskTransitionResume] {
+            let mut arguments = FieldTable::default();
+            arguments.insert(
+                "x-dead-letter-exchange".into(),
+                AMQPValue::LongString(DEAD_LETTER_EXCHANGE.into()),
+            );
+            let queue = kind.queue_name();
+            channel
+                .queue_declare(
+                    queue.into(),
+                    QueueDeclareOptions {
+                        durable: true,
+                        ..Default::default()
+                    },
+                    arguments,
+                )
+                .await
+                .map_err(|_| PlatformError::Unavailable)?;
+            channel
+                .queue_bind(
+                    queue.into(),
+                    JOBS_EXCHANGE.into(),
+                    kind.routing_key().into(),
+                    QueueBindOptions::default(),
+                    FieldTable::default(),
+                )
+                .await
+                .map_err(|_| PlatformError::Unavailable)?;
+        }
+        Self::declare_knowledge_retry_queue(channel).await?;
+        Ok(())
+    }
+
+    async fn declare_knowledge_retry_queue(channel: &Channel) -> Result<(), PlatformError> {
         let mut arguments = FieldTable::default();
         arguments.insert(
             "x-dead-letter-exchange".into(),
-            AMQPValue::LongString(DEAD_LETTER_EXCHANGE.into()),
+            AMQPValue::LongString(JOBS_EXCHANGE.into()),
         );
-        let queue = JobKind::KnowledgeSynthesis.queue_name();
+        arguments.insert(
+            "x-dead-letter-routing-key".into(),
+            AMQPValue::LongString(JobKind::KnowledgeSynthesis.routing_key().into()),
+        );
         channel
             .queue_declare(
-                queue.into(),
+                KNOWLEDGE_RETRY_QUEUE.into(),
                 QueueDeclareOptions {
                     durable: true,
                     ..Default::default()
@@ -78,14 +117,13 @@ impl RabbitMqJobWakeupTopology {
             .map_err(|_| PlatformError::Unavailable)?;
         channel
             .queue_bind(
-                queue.into(),
+                KNOWLEDGE_RETRY_QUEUE.into(),
                 JOBS_EXCHANGE.into(),
-                JobKind::KnowledgeSynthesis.routing_key().into(),
+                KNOWLEDGE_RETRY_ROUTING_KEY.into(),
                 QueueBindOptions::default(),
                 FieldTable::default(),
             )
             .await
-            .map_err(|_| PlatformError::Unavailable)?;
-        Ok(())
+            .map_err(|_| PlatformError::Unavailable)
     }
 }

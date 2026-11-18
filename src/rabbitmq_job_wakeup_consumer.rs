@@ -1,11 +1,15 @@
-use crate::{RabbitMqJobWakeupDelivery, RabbitMqJobWakeupTopology};
+use crate::{
+    RabbitMqJobWakeupDelivery, RabbitMqJobWakeupTopology, TaskKnowledgeJobKind, WorkerJobWakeup,
+};
 use futures_lite::StreamExt;
 use lapin::{
     Connection, ConnectionProperties,
     options::{BasicConsumeOptions, BasicQosOptions},
     types::FieldTable,
 };
-use nexora_platform_contracts::{JobKind, JobWakeup, PlatformError};
+use nexora_platform_contracts::PlatformError;
+
+const KNOWLEDGE_QUEUE: &str = "nexora.jobs.knowledge";
 
 pub(crate) struct RabbitMqJobWakeupConsumer {
     _connection: Connection,
@@ -28,7 +32,7 @@ impl RabbitMqJobWakeupConsumer {
             .map_err(|_| PlatformError::Unavailable)?;
         let consumer = channel
             .basic_consume(
-                JobKind::KnowledgeSynthesis.queue_name().into(),
+                KNOWLEDGE_QUEUE.into(),
                 "".into(),
                 BasicConsumeOptions::default(),
                 FieldTable::default(),
@@ -55,6 +59,14 @@ impl RabbitMqJobWakeupConsumer {
                 .message_id()
                 .as_ref()
                 .map(|value| value.as_str());
+            let wakeup = WorkerJobWakeup::parse(&delivery.data);
+            let Some(wakeup) = wakeup else {
+                delivery
+                    .reject(lapin::options::BasicRejectOptions { requeue: false })
+                    .await
+                    .map_err(|_| PlatformError::Unavailable)?;
+                continue;
+            };
             if !Self::valid_wakeup(&delivery.data, message_id) {
                 delivery
                     .reject(lapin::options::BasicRejectOptions { requeue: false })
@@ -63,19 +75,21 @@ impl RabbitMqJobWakeupConsumer {
                 continue;
             }
 
-            return Ok(Some(RabbitMqJobWakeupDelivery::new(delivery)));
+            return Ok(Some(RabbitMqJobWakeupDelivery::new(delivery, wakeup)));
         }
     }
 
     fn valid_wakeup(body: &[u8], message_id: Option<&str>) -> bool {
-        serde_json::from_slice::<JobWakeup>(body).is_ok_and(|wakeup| {
+        WorkerJobWakeup::parse(body).is_some_and(|wakeup| {
             matches!(
                 wakeup.kind(),
-                JobKind::KnowledgeSynthesis
-                    | JobKind::KnowledgeProcessing
-                    | JobKind::DailyDeveloperAnalysis
-            ) && wakeup.kind().queue_name() == JobKind::KnowledgeSynthesis.queue_name()
-                && message_id == Some(wakeup.job_id())
+                "knowledge_synthesis"
+                    | "knowledge_processing"
+                    | "daily_developer_analysis"
+                    | "task_review"
+            ) && message_id == Some(wakeup.job_id())
+                && (wakeup.kind() != "task_review"
+                    || TaskKnowledgeJobKind::from_wakeup(wakeup.job_id()).is_some())
         })
     }
 }
@@ -84,6 +98,7 @@ impl RabbitMqJobWakeupConsumer {
 mod tests {
     use super::RabbitMqJobWakeupConsumer;
     use nexora_platform_contracts::{JobKind, JobWakeup};
+    use serde_json::json;
 
     #[test]
     fn accepts_only_knowledge_queue_wakeups_with_matching_message_ids() {
@@ -104,11 +119,35 @@ mod tests {
             ));
         }
 
+        for id in ["tcr_a1b2c3", "tgr_a1b2c3"] {
+            let body = serde_json::to_vec(&json!({
+                "version": 1,
+                "job_id": id,
+                "kind": "task_review"
+            }))
+            .unwrap();
+            assert!(RabbitMqJobWakeupConsumer::valid_wakeup(&body, Some(id)));
+            assert!(!RabbitMqJobWakeupConsumer::valid_wakeup(
+                &body,
+                Some("different_id")
+            ));
+        }
+
         let wakeup = JobWakeup::new("repo_job_1".into(), JobKind::RepositoryIndex).unwrap();
         let body = serde_json::to_vec(&wakeup).unwrap();
         assert!(!RabbitMqJobWakeupConsumer::valid_wakeup(
             &body,
             Some("repo_job_1")
         ));
+
+        for id in ["unknown_1", "tcr_", "tgr"] {
+            let body = serde_json::to_vec(&json!({
+                "version": 1,
+                "job_id": id,
+                "kind": "task_review"
+            }))
+            .unwrap();
+            assert!(!RabbitMqJobWakeupConsumer::valid_wakeup(&body, Some(id)));
+        }
     }
 }
