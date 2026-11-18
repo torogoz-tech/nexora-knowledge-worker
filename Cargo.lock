@@ -1463,7 +1463,7 @@ dependencies = [
 [[package]]
 name = "nexora-database-connections"
 version = "0.4.0"
-source = "git+https://github.com/torogoz-tech/nexora-job-store.git?rev=23c86858f51e6cfac918399d073f838b804beb19#23c86858f51e6cfac918399d073f838b804beb19"
+source = "git+https://github.com/torogoz-tech/nexora-job-store.git?rev=1cedd26f9af3798d3d7475cc3190ac961726f7fe#1cedd26f9af3798d3d7475cc3190ac961726f7fe"
 dependencies = [
  "nexora-core",
  "postgres",
@@ -1474,7 +1474,7 @@ dependencies = [
 [[package]]
 name = "nexora-knowledge-store"
 version = "0.4.0"
-source = "git+https://github.com/torogoz-tech/nexora-job-store.git?rev=23c86858f51e6cfac918399d073f838b804beb19#23c86858f51e6cfac918399d073f838b804beb19"
+source = "git+https://github.com/torogoz-tech/nexora-job-store.git?rev=1cedd26f9af3798d3d7475cc3190ac961726f7fe#1cedd26f9af3798d3d7475cc3190ac961726f7fe"
 dependencies = [
  "aes-gcm",
  "getrandom 0.3.4",

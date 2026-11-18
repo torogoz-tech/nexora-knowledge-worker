@@ -9,8 +9,8 @@ clap = { version = "4", features = ["derive", "env"] }
 base64 = "0.22"
 futures-lite = "2"
 lapin = { version = "4.12.3", default-features = false, features = ["rustls--ring", "tokio"] }
-nexora-database-connections = { git = "https://github.com/torogoz-tech/nexora-job-store.git", rev = "23c86858f51e6cfac918399d073f838b804beb19" }
-nexora-knowledge-store = { git = "https://github.com/torogoz-tech/nexora-job-store.git", rev = "23c86858f51e6cfac918399d073f838b804beb19" }
+nexora-database-connections = { git = "https://github.com/torogoz-tech/nexora-job-store.git", rev = "1cedd26f9af3798d3d7475cc3190ac961726f7fe" }
+nexora-knowledge-store = { git = "https://github.com/torogoz-tech/nexora-job-store.git", rev = "1cedd26f9af3798d3d7475cc3190ac961726f7fe" }
 nexora-platform-contracts = { package = "nexora-platform", git = "https://github.com/torogoz-tech/nexora-platform-contracts.git", tag = "0.4.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
